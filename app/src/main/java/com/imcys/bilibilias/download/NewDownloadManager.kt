@@ -31,8 +31,10 @@ import com.imcys.bilibilias.database.entity.download.DownloadTaskNodeType
 import com.imcys.bilibilias.database.entity.download.DownloadTaskType
 import com.imcys.bilibilias.database.entity.download.NamingConventionInfo
 import com.imcys.bilibilias.download.service.DownloadService
+import com.imcys.bilibilias.network.NetWorkResult
 import com.imcys.bilibilias.network.model.video.BILIVideoDash
 import com.imcys.bilibilias.network.model.video.BILIVideoDurl
+import com.imcys.bilibilias.network.model.video.BILIVideoPlayerInfoV2
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsBytes
@@ -346,10 +348,14 @@ class NewDownloadManager(
     private suspend fun handlePredecessor(task: AppDownloadTask, service: DownloadService) {
         updateTaskState(task, DownloadState.PRE_TASK)
 
+        // 获取当前segment对应的videoPlayerInfoV2（用于字幕下载）
+        // 多选下载时，每个segment需要获取自己对应的字幕信息
+        val segmentVideoPlayerInfoV2 = getSegmentVideoPlayerInfoV2(task)
+
         // 下载嵌入字幕
         if (task.downloadViewInfo.embedCC) {
             val subtitles = subtitleDownloader.downloadSubtitlesForEmbed(
-                task.downloadViewInfo.videoPlayerInfoV2,
+                segmentVideoPlayerInfoV2,
                 task.downloadSegment.segmentId
             )
             task.updateRuntimeInfo(task.taskRuntimeInfo.copy(subtitles = subtitles))
@@ -378,13 +384,35 @@ class NewDownloadManager(
         // 下载字幕文件
         if (task.downloadViewInfo.downloadCC) {
             subtitleDownloader.downloadSubtitlesToFile(
-                task.downloadViewInfo.videoPlayerInfoV2,
-                task.downloadSegment.title,
+                segmentVideoPlayerInfoV2,
+                task.downloadSegment.namingConventionInfo,
                 task.downloadViewInfo.ccFileType
             )
         }
 
         updateTaskState(task, DownloadState.WAITING)
+    }
+
+    /**
+     * 获取当前segment对应的videoPlayerInfoV2
+     * 多选下载时，每个segment需要获取自己对应的字幕信息
+     */
+    private suspend fun getSegmentVideoPlayerInfoV2(task: AppDownloadTask): NetWorkResult<BILIVideoPlayerInfoV2?> {
+        // 如果全局的videoPlayerInfoV2有效（只有一个视频），直接使用
+        if (task.downloadViewInfo.videoPlayerInfoV2.data?.subtitle?.subtitles?.isNotEmpty() == true) {
+            return task.downloadViewInfo.videoPlayerInfoV2
+        }
+
+        // 多选下载时，需要根据segment的CID获取对应的videoPlayerInfoV2
+        val cid = task.downloadSegment.platformUniqueId.toLongOrNull() ?: return task.downloadViewInfo.videoPlayerInfoV2
+        val bvId = task.downloadSegment.platformId
+
+        return try {
+            videoInfoRepository.getVideoPlayerInfoV2(cid, bvId)
+        } catch (e: Exception) {
+            // 如果获取失败，返回全局的videoPlayerInfoV2
+            task.downloadViewInfo.videoPlayerInfoV2
+        }
     }
 
     @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
