@@ -7,6 +7,7 @@ import com.imcys.bilibilias.common.utils.toHttps
 import com.imcys.bilibilias.data.model.download.CCFileType
 import com.imcys.bilibilias.data.model.download.lowercase
 import com.imcys.bilibilias.data.repository.VideoInfoRepository
+import com.imcys.bilibilias.database.entity.download.NamingConventionInfo
 import com.imcys.bilibilias.network.NetWorkResult
 import com.imcys.bilibilias.network.model.video.BILIVideoCCInfo
 import com.imcys.bilibilias.network.model.video.BILIVideoPlayerInfoV2
@@ -22,7 +23,8 @@ import java.io.FileOutputStream
 class SubtitleDownloader(
     private val videoInfoRepository: VideoInfoRepository,
     private val fileOutputManager: FileOutputManager,
-    private val context: Application
+    private val context: Application,
+    private val namingConventionHandler: NamingConventionHandler
 ) {
     /**
      * 下载字幕用于嵌入视频
@@ -61,10 +63,13 @@ class SubtitleDownloader(
 
     /**
      * 下载字幕到下载目录
+     * @param videoPlayerInfoV2 视频播放信息
+     * @param namingConventionInfo 命名规则信息
+     * @param ccFileType 字幕文件类型
      */
     suspend fun downloadSubtitlesToFile(
         videoPlayerInfoV2: NetWorkResult<BILIVideoPlayerInfoV2?>,
-        title: String,
+        namingConventionInfo: NamingConventionInfo?,
         ccFileType: CCFileType
     ) = withContext(Dispatchers.IO) {
         videoPlayerInfoV2.data?.subtitle?.subtitles?.forEach { cc ->
@@ -72,7 +77,15 @@ class SubtitleDownloader(
             val finalUrl = if (!url.contains("https")) "https:" else ""
             val videoCCInfo = videoInfoRepository.getVideoCCInfo((finalUrl + url).toHttps())
             val content = convertCc(videoCCInfo, ccFileType)
-            val fileName = "${title}_${cc.lan}_${ccFileType.lowercase()}"
+
+            // 使用命名规则生成文件名，与视频文件保持一致
+            val subtitleExtension = when (ccFileType) {
+                CCFileType.ASS -> "ass"
+                CCFileType.SRT -> "srt"
+            }
+            val baseFileName = namingConventionHandler.buildFileName(namingConventionInfo, subtitleExtension)
+            // 移除视频文件后缀，替换为字幕后缀
+            val fileName = baseFileName.substringBeforeLast(".") + "_${cc.lan}." + subtitleExtension
 
             val subtitleType = when (ccFileType) {
                 CCFileType.ASS -> FileOutputManager.SubtitleType.ASS
