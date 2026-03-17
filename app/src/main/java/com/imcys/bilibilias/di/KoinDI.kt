@@ -84,7 +84,7 @@ val appModule = module {
     single { DownloadExecutor(get(qualifier = named("DownloadHttpClient")), get()) }
     single { FfmpegMerger(androidApplication(),get()) }
     single { NamingConventionHandler(get()) }
-    single { SubtitleDownloader(get(), get(), androidApplication()) }
+    single { SubtitleDownloader(get(), get(), androidApplication(), get()) }
 
     single {
         DownloadManager(
